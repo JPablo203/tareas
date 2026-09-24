@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView,
   View,
@@ -9,140 +9,221 @@ import {
   Pressable,
   Modal,
   StyleSheet,
-  ImageSourcePropType,
   ImageResizeMode,
+  Alert,
 } from 'react-native';
 
-// Definición del tipo para cada producto
-interface Producto {
-  id: string;
+
+export const API_URL = 'http://10.249.83.201:3000';
+
+interface Enano {
+  id: number;
   titulo: string;
   precio: number;
   descripcion: string;
-  imagen: ImageSourcePropType; // Soporta tanto require(...) como { uri: '...' }
+  imagen: string;
+  edad: number;
 }
 
-// Datos iniciales cumpliendo la consigna de imagen local y remota
-const PRODUCTOS_INICIALES: Producto[] = [
-  {
-    id: '1',
-    titulo: 'Icono Local Expo',
-    precio: 1500,
-    descripcion: 'Producto que carga una imagen local usando require(...).',
-    imagen: require('../../assets/icon.jpeg'), // Ajustá la ruta según la ubicación de tu archivo
-  },
-  {
-    id: '2',
-    titulo: 'Auriculares Inalámbricos',
-    precio: 8500,
-    descripcion: 'Auriculares de alta fidelidad con cancelación de ruido activa.',
-    imagen: { uri: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&q=80' },
-  },
-  {
-    id: '3',
-    titulo: 'Smartwatch Deportivo',
-    precio: 12000,
-    descripcion: 'Reloj inteligente con monitor de ritmo cardíaco y GPS integrado.',
-    imagen: { uri: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&q=80' },
-  },
-  {
-    id: '4',
-    titulo: 'Cámara Vintage',
-    precio: 23000,
-    descripcion: 'Cámara clásica analógica para fotografía urbana y retratos.',
-    imagen: { uri: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=500&q=80' },
-  },
-];
-
 export default function GaleriaScreen() {
+  const [enanos, setEnanos] = useState<Enano[]>([]);
   const [busqueda, setBusqueda] = useState<string>('');
-  const [favoritos, setFavoritos] = useState<string[]>([]);
-  const [productoSeleccionado, setProductoSeleccionado] = useState<Producto | null>(null);
+  const [favoritos, setFavoritos] = useState<number[]>([]);
+  const [enanoSeleccionado, setEnanoSeleccionado] = useState<Enano | null>(null);
   const [resizeModeModal, setResizeModeModal] = useState<ImageResizeMode>('cover');
 
-  // Filtrado en tiempo real por título
-  const productosFiltrados = PRODUCTOS_INICIALES.filter((item) =>
+  // Estados para el formulario de alta (Parte A)
+  const [nuevoTitulo, setNuevoTitulo] = useState('');
+  const [nuevaEdad, setNuevaEdad] = useState('');
+  const [nuevoPrecio, setNuevoPrecio] = useState('');
+
+  // 1. Obtener Enanos desde el Backend (SQLite vía Prisma)
+  const fetchEnanos = async () => {
+    try {
+      const res = await fetch(`${API_URL}/enanos`);
+      if (res.ok) {
+        const data = await res.json();
+        setEnanos(data);
+      }
+    } catch (error) {
+      console.log('Error al conectar con el backend:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchEnanos();
+  }, []);
+
+  // 2. PARTE A: Crear un nuevo enano ingresando la edad desde el TextInput
+  const crearEnano = async () => {
+    if (!nuevoTitulo.trim() || !nuevaEdad.trim()) {
+      Alert.alert('Atención', 'Completá al menos el nombre y la edad');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/enanos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo: nuevoTitulo,
+          edad: parseInt(nuevaEdad, 10) || 0,
+          precio: parseFloat(nuevoPrecio) || 1500,
+          descripcion: `Enano de ${nuevaEdad} años de edad`,
+          imagen: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&q=80',
+        }),
+      });
+
+      if (res.ok) {
+        setNuevoTitulo('');
+        setNuevaEdad('');
+        setNuevoPrecio('');
+        fetchEnanos(); // Recargar datos de la base de datos
+      }
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo guardar en la base de datos');
+    }
+  };
+
+  // 3. PARTE B: Eliminar enano de la base de datos
+  const eliminarEnano = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}/enanos/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok || res.status === 204) {
+        setEnanos((prev) => prev.filter((item) => item.id !== id));
+      } else {
+        Alert.alert('Error', 'No se pudo eliminar el enano');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Fallo de conexión al eliminar');
+    }
+  };
+
+  // Filtrado en tiempo real
+  const productosFiltrados = enanos.filter((item) =>
     item.titulo.toLowerCase().includes(busqueda.toLowerCase())
   );
 
-  // Alternar favorito usando onLongPress
-  const toggleFavorito = (id: string) => {
+  const toggleFavorito = (id: number) => {
     setFavoritos((prev) =>
       prev.includes(id) ? prev.filter((favId) => favId !== id) : [...prev, id]
     );
   };
 
-  // Renderizado individual para FlatList
-  const renderItem = ({ item }: { item: Producto }) => {
+  const renderItem = ({ item }: { item: Enano }) => {
     const esFavorito = favoritos.includes(item.id);
 
     return (
       <Pressable
         style={[styles.card, esFavorito && styles.cardFavorito]}
         onPress={() => {
-          setResizeModeModal('cover'); // Reset al abrir
-          setProductoSeleccionado(item);
+          setResizeModeModal('cover');
+          setEnanoSeleccionado(item);
         }}
         onLongPress={() => toggleFavorito(item.id)}
       >
-        <Image source={item.imagen} style={styles.thumbnail} resizeMode="cover" />
+        <Image source={{ uri: item.imagen }} style={styles.thumbnail} resizeMode="cover" />
         <View style={styles.cardInfo}>
           <View style={styles.headerCard}>
             <Text style={styles.cardTitulo}>{item.titulo}</Text>
             {esFavorito && <Text style={styles.badgeFavorito}>★ Favorito</Text>}
           </View>
+          <Text style={styles.cardEdad}>Edad: {item.edad} años</Text>
           <Text style={styles.cardPrecio}>${item.precio.toLocaleString('es-AR')}</Text>
           <Text style={styles.cardHint}>Mantené presionado para favoritar</Text>
         </View>
+
+        {/* PARTE B: Botón dentro de la tarjeta para eliminar de la db */}
+        <Pressable
+          style={styles.btnEliminar}
+          onPress={(e) => {
+            e.stopPropagation();
+            eliminarEnano(item.id);
+          }}
+        >
+          <Text style={styles.btnEliminarTexto}>Eliminar</Text>
+        </Pressable>
       </Pressable>
     );
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Barra de búsqueda con TextInput */}
+      {/* PARTE A: Formulario con TextInput para ingresar la edad */}
+      <View style={styles.formContainer}>
+        <Text style={styles.formTitulo}>Agregar Nuevo Enano</Text>
+        <TextInput
+          style={styles.inputForm}
+          placeholder="Nombre del Enano"
+          value={nuevoTitulo}
+          onChangeText={setNuevoTitulo}
+          placeholderTextColor="#94a3b8"
+        />
+        <TextInput
+          style={styles.inputForm}
+          placeholder="Edad del Enano (TextInput requerido)"
+          value={nuevaEdad}
+          onChangeText={setNuevaEdad}
+          keyboardType="numeric"
+          placeholderTextColor="#94a3b8"
+        />
+        <TextInput
+          style={styles.inputForm}
+          placeholder="Precio"
+          value={nuevoPrecio}
+          onChangeText={setNuevoPrecio}
+          keyboardType="numeric"
+          placeholderTextColor="#94a3b8"
+        />
+        <Pressable style={styles.btnGuardar} onPress={crearEnano}>
+          <Text style={styles.btnGuardarTexto}>Guardar en la DB</Text>
+        </Pressable>
+      </View>
+
+      {/* Buscador */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar producto por título..."
+          placeholder="Buscar enano por título..."
           value={busqueda}
           onChangeText={setBusqueda}
           placeholderTextColor="#94a3b8"
         />
       </View>
 
-      {/* Lista optimizada con FlatList */}
+      {/* FlatList con tarjetas */}
       <FlatList
         data={productosFiltrados}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={renderItem}
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No se encontraron productos coincidentes.</Text>
+          <Text style={styles.emptyText}>No hay enanos registrados en la DB.</Text>
         }
       />
 
       {/* Modal de Detalle */}
       <Modal
-        visible={productoSeleccionado !== null}
+        visible={enanoSeleccionado !== null}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setProductoSeleccionado(null)}
+        onRequestClose={() => setEnanoSeleccionado(null)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {productoSeleccionado && (
+            {enanoSeleccionado && (
               <>
-                {/* Imagen grande con resizeMode dinámico */}
                 <View style={styles.modalImageWrapper}>
                   <Image
-                    source={productoSeleccionado.imagen}
+                    source={{ uri: enanoSeleccionado.imagen }}
                     style={styles.modalImage}
                     resizeMode={resizeModeModal}
                   />
                 </View>
 
-                {/* Controles de resizeMode */}
                 <Text style={styles.selectorLabel}>Ajuste de Imagen (resizeMode):</Text>
                 <View style={styles.resizeButtonsRow}>
                   {(['cover', 'contain', 'stretch'] as ImageResizeMode[]).map((mode) => (
@@ -166,17 +247,18 @@ export default function GaleriaScreen() {
                   ))}
                 </View>
 
-                <Text style={styles.modalTitulo}>{productoSeleccionado.titulo}</Text>
+                <Text style={styles.modalTitulo}>{enanoSeleccionado.titulo}</Text>
+                <Text style={styles.modalEdad}>Edad: {enanoSeleccionado.edad} años</Text>
                 <Text style={styles.modalPrecio}>
-                  ${productoSeleccionado.precio.toLocaleString('es-AR')}
+                  ${enanoSeleccionado.precio.toLocaleString('es-AR')}
                 </Text>
                 <Text style={styles.modalDescripcion}>
-                  {productoSeleccionado.descripcion}
+                  {enanoSeleccionado.descripcion}
                 </Text>
 
                 <Pressable
                   style={styles.closeButton}
-                  onPress={() => setProductoSeleccionado(null)}
+                  onPress={() => setEnanoSeleccionado(null)}
                 >
                   <Text style={styles.closeButtonText}>Cerrar</Text>
                 </Pressable>
@@ -194,31 +276,66 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  formContainer: {
+    padding: 14,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#cbd5e1',
+  },
+  formTitulo: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#0f172a',
+    marginBottom: 8,
+  },
+  inputForm: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#f8fafc',
+    marginBottom: 6,
+    fontSize: 14,
+  },
+  btnGuardar: {
+    backgroundColor: '#2563eb',
+    paddingVertical: 9,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  btnGuardarTexto: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
   searchContainer: {
-    padding: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
   searchInput: {
-    height: 46,
+    height: 42,
     borderWidth: 1,
     borderColor: '#cbd5e1',
     borderRadius: 8,
     paddingHorizontal: 12,
     backgroundColor: '#f1f5f9',
-    fontSize: 16,
+    fontSize: 15,
     color: '#0f172a',
   },
   listContainer: {
-    padding: 16,
+    padding: 14,
   },
   card: {
     flexDirection: 'row',
     backgroundColor: '#ffffff',
     borderRadius: 10,
-    marginBottom: 12,
-    padding: 12,
+    marginBottom: 10,
+    padding: 10,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     alignItems: 'center',
@@ -228,8 +345,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fffbeb',
   },
   thumbnail: {
-    width: 70,
-    height: 70,
+    width: 65,
+    height: 65,
     borderRadius: 8,
     backgroundColor: '#e2e8f0',
   },
@@ -243,7 +360,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cardTitulo: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#0f172a',
     flex: 1,
@@ -253,24 +370,40 @@ const styles = StyleSheet.create({
     color: '#d97706',
     fontWeight: 'bold',
   },
+  cardEdad: {
+    fontSize: 13,
+    color: '#475569',
+    marginTop: 2,
+  },
   cardPrecio: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: '#2563eb',
-    marginTop: 4,
+    marginTop: 2,
   },
   cardHint: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#94a3b8',
     marginTop: 2,
   },
+  btnEliminar: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  btnEliminarTexto: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
   emptyText: {
     textAlign: 'center',
-    marginTop: 40,
+    marginTop: 30,
     color: '#64748b',
-    fontSize: 15,
+    fontSize: 14,
   },
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.65)',
@@ -285,11 +418,11 @@ const styles = StyleSheet.create({
   },
   modalImageWrapper: {
     width: '100%',
-    height: 200,
+    height: 180,
     backgroundColor: '#f1f5f9',
     borderRadius: 10,
     overflow: 'hidden',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   modalImage: {
     width: '100%',
@@ -299,16 +432,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#64748b',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   resizeButtonsRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   modeButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#cbd5e1',
@@ -327,28 +460,33 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   modalTitulo: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#0f172a',
     textAlign: 'center',
   },
-  modalPrecio: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#2563eb',
-    marginVertical: 6,
-  },
-  modalDescripcion: {
+  modalEdad: {
     fontSize: 14,
     color: '#475569',
+    marginVertical: 2,
+  },
+  modalPrecio: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2563eb',
+    marginVertical: 4,
+  },
+  modalDescripcion: {
+    fontSize: 13,
+    color: '#475569',
     textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 20,
+    marginBottom: 16,
+    lineHeight: 18,
   },
   closeButton: {
     backgroundColor: '#0f172a',
-    paddingVertical: 10,
-    paddingHorizontal: 30,
+    paddingVertical: 9,
+    paddingHorizontal: 25,
     borderRadius: 8,
     width: '100%',
     alignItems: 'center',
@@ -356,6 +494,6 @@ const styles = StyleSheet.create({
   closeButtonText: {
     color: '#ffffff',
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 14,
   },
 });
